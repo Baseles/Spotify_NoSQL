@@ -4,20 +4,44 @@ const mongoose = require('mongoose');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 1. Middleware para leer JSON en peticiones POST/PUT
 app.use(express.json());
 
-// 2. Conexión a MongoDB (usa variable de entorno en Vercel o la URI de respaldo)
 const MONGO_URI =
   process.env.MONGODB_URI ||
-  'mongodb+srv://root:root@cluster0.vcrqhkl.mongodb.net/spotify'; //
+  'mongodb+srv://root:root@cluster0.vcrqhkl.mongodb.net/spotify';
 
-mongoose
-  .connect(MONGO_URI)
-  .then(() => console.log('Conectado a MongoDB (spotify)'))
-  .catch((err) => console.error('Error conectando a MongoDB:', err));
+// Cache de conexión para Vercel (Serverless)
+let cached = global.mongoose;
+if (!cached) {
+  cached = global.mongoose = { conn: null, promise: null };
+}
 
-// 3. Esquemas y modelos (según tu captura)
+async function conectarDB() {
+  if (cached.conn) {
+    return cached.conn;
+  }
+  if (!cached.promise) {
+    cached.promise = mongoose
+      .connect(MONGO_URI, {
+        bufferCommands: false,
+      })
+      .then((mongooseInstance) => mongooseInstance);
+  }
+  cached.conn = await cached.promise;
+  return cached.conn;
+}
+
+// Middleware: garantiza conexión activa en cada petición antes de tocar la BD
+app.use(async (req, res, next) => {
+  try {
+    await conectarDB();
+    next();
+  } catch (error) {
+    res.status(500).json({ error: 'Error de conexión a MongoDB', detalle: error.message });
+  }
+});
+
+// Esquemas y modelos
 const artistaSchema = new mongoose.Schema({
   nombre: String,
   pais: String,
@@ -26,9 +50,9 @@ const artistaSchema = new mongoose.Schema({
   integrantes: Number,
   reproduccionesMensuales: Number,
   urlFoto: String,
-}); //[cite: 2]
+});
 
-const Artista = mongoose.model('Artista', artistaSchema, 'artistas'); //[cite: 2]
+const Artista = mongoose.model('Artista', artistaSchema, 'artistas');
 
 const cancionSchema = new mongoose.Schema({
   titulo: String,
@@ -38,16 +62,15 @@ const cancionSchema = new mongoose.Schema({
   reproducciones: Number,
   añoLanzamiento: Number,
   urlFotoAlbum: String,
-}); //[cite: 2]
+});
 
-const Cancion = mongoose.model('Cancion', cancionSchema, 'canciones'); //[cite: 2]
+const Cancion = mongoose.model('Cancion', cancionSchema, 'canciones');
 
-// 4. Rutas de prueba y inserción (POST) / consulta (GET)
+// Rutas
 app.get('/', (req, res) => {
   res.send('API Spotify funcionando');
 });
 
-// Insertar un artista
 app.post('/artistas', async (req, res) => {
   try {
     const nuevoArtista = new Artista(req.body);
@@ -58,7 +81,6 @@ app.post('/artistas', async (req, res) => {
   }
 });
 
-// Consultar artistas (útil para verificar en Postman o navegador)
 app.get('/artistas', async (req, res) => {
   try {
     const artistas = await Artista.find();
@@ -68,7 +90,6 @@ app.get('/artistas', async (req, res) => {
   }
 });
 
-// Insertar una canción
 app.post('/canciones', async (req, res) => {
   try {
     const nuevaCancion = new Cancion(req.body);
@@ -79,7 +100,6 @@ app.post('/canciones', async (req, res) => {
   }
 });
 
-// Consultar canciones (con populate opcional para ver datos del artista)
 app.get('/canciones', async (req, res) => {
   try {
     const canciones = await Cancion.find().populate('artista_id');
@@ -89,7 +109,6 @@ app.get('/canciones', async (req, res) => {
   }
 });
 
-// 5. Escuchar puerto en local y exportar app para Vercel
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`Servidor corriendo en http://localhost:${PORT}`);
