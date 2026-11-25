@@ -1,2 +1,7 @@
-node_modules
 node_modules/
+
+# Skills y configuración local de Claude
+.claude/
+skills/
+claude-webkit/
+CLAUDE.md

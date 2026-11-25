@@ -1,10 +1,14 @@
 const express = require('express');
 const mongoose = require('mongoose');
+const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
+
+// Frontend estático (se sirve antes de conectar a la BD)
+app.use(express.static(path.join(__dirname, 'public')));
 
 const MONGO_URI =
   process.env.MONGODB_URI ||
@@ -67,9 +71,17 @@ const cancionSchema = new mongoose.Schema({
 const Cancion = mongoose.model('Cancion', cancionSchema, 'canciones');
 
 // Rutas
-app.get('/', (req, res) => {
+app.get('/api/status', (req, res) => {
   res.send('API Spotify funcionando');
 });
+
+// Maneja errores comunes (id inválido -> 400, no encontrado -> 404)
+function manejarError(res, error) {
+  if (error.name === 'CastError' || error.name === 'ValidationError') {
+    return res.status(400).json({ error: error.message });
+  }
+  res.status(500).json({ error: error.message });
+}
 
 app.post('/artistas', async (req, res) => {
   try {
@@ -90,6 +102,41 @@ app.get('/artistas', async (req, res) => {
   }
 });
 
+app.get('/artistas/:id', async (req, res) => {
+  try {
+    const artista = await Artista.findById(req.params.id);
+    if (!artista) return res.status(404).json({ error: 'Artista no encontrado' });
+    res.json(artista);
+  } catch (error) {
+    manejarError(res, error);
+  }
+});
+
+app.put('/artistas/:id', async (req, res) => {
+  try {
+    const artista = await Artista.findByIdAndUpdate(req.params.id, req.body, {
+      returnDocument: 'after',
+      runValidators: true,
+    });
+    if (!artista) return res.status(404).json({ error: 'Artista no encontrado' });
+    res.json(artista);
+  } catch (error) {
+    manejarError(res, error);
+  }
+});
+
+// Elimina el artista y sus canciones asociadas
+app.delete('/artistas/:id', async (req, res) => {
+  try {
+    const artista = await Artista.findByIdAndDelete(req.params.id);
+    if (!artista) return res.status(404).json({ error: 'Artista no encontrado' });
+    const { deletedCount } = await Cancion.deleteMany({ artista_id: artista._id });
+    res.json({ mensaje: 'Artista eliminado', artista, cancionesEliminadas: deletedCount });
+  } catch (error) {
+    manejarError(res, error);
+  }
+});
+
 app.post('/canciones', async (req, res) => {
   try {
     const nuevaCancion = new Cancion(req.body);
@@ -106,6 +153,39 @@ app.get('/canciones', async (req, res) => {
     res.json(canciones);
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/canciones/:id', async (req, res) => {
+  try {
+    const cancion = await Cancion.findById(req.params.id).populate('artista_id');
+    if (!cancion) return res.status(404).json({ error: 'Canción no encontrada' });
+    res.json(cancion);
+  } catch (error) {
+    manejarError(res, error);
+  }
+});
+
+app.put('/canciones/:id', async (req, res) => {
+  try {
+    const cancion = await Cancion.findByIdAndUpdate(req.params.id, req.body, {
+      returnDocument: 'after',
+      runValidators: true,
+    }).populate('artista_id');
+    if (!cancion) return res.status(404).json({ error: 'Canción no encontrada' });
+    res.json(cancion);
+  } catch (error) {
+    manejarError(res, error);
+  }
+});
+
+app.delete('/canciones/:id', async (req, res) => {
+  try {
+    const cancion = await Cancion.findByIdAndDelete(req.params.id);
+    if (!cancion) return res.status(404).json({ error: 'Canción no encontrada' });
+    res.json({ mensaje: 'Canción eliminada', cancion });
+  } catch (error) {
+    manejarError(res, error);
   }
 });
 
